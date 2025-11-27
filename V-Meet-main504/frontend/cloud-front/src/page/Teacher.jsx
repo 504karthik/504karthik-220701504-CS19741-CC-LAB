@@ -1,0 +1,535 @@
+import React, { useState, useEffect } from "react";
+import Cookies from "js-cookie";
+import apiFetch from "../components/apifetch/index";
+import Notify from "../components/notify";
+import { Menu, X, BookOpen, Cpu, MessageCircle, Loader } from "lucide-react";
+import TextType from "../components/TextType/TextType";
+
+const TeacherPortal = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeSection, setActiveSection] = useState("courses");
+  const [classes, setClasses] = useState([]);
+  const [newClassId, setNewClassId] = useState("");
+  const [students, setStudents] = useState([]);
+  const [studentEmail, setStudentEmail] = useState("");
+  const [selectedClass, setSelectedClass] = useState("");
+  const [selectedVmClass, setSelectedVmClass] = useState("");
+  const [vmType, setVmType] = useState("pythonVM");
+  const [vmRequests, setVmRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [notification, setNotification] = useState({
+    show: false,
+    message: "",
+    type: "success",
+  });
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState([]);
+  const [isTyping, setIsTyping] = useState(false);
+
+  const user = JSON.parse(Cookies.get("user") || "{}");
+  const teacherName = user.fullname || "";
+  const teacherEmail = user.email || "";
+
+  // Fetch Courses
+  const fetchCourses = async () => {
+    const data = await apiFetch("/api/teacher/courses/list", { teacherName });
+    if (data.success) {
+      setClasses(data.courses);
+      if (data.courses.length > 0) {
+        setSelectedClass(data.courses[0].CourseName);
+        setSelectedVmClass(data.courses[0].CourseName);
+      }
+    }
+  };
+
+  // Fetch Students
+  const fetchStudents = async () => {
+    if (!selectedClass) return;
+    setLoading(true);
+    const data = await apiFetch("/api/teacher/students/list", {
+      teacherName,
+      courseName: selectedClass,
+    });
+    if (data.success) setStudents(data.students);
+    setLoading(false);
+  };
+
+  // Fetch VM Requests
+  const fetchVmRequests = async () => {
+    try {
+      const res = await fetch("https://vmeetbackend.azurewebsites.net/api/admin/vm/requests");
+      const data = await res.json();
+      if (data.success) {
+        const filtered = data.requests.filter(
+          (req) => req.teacherEmail === teacherEmail
+        );
+        setVmRequests(filtered);
+      }
+    } catch (err) {
+      console.error("Error fetching VM requests:", err);
+    }
+  };
+
+  // Add New Class
+  const handleAddClass = async () => {
+    if (!newClassId.trim()) return;
+    const data = await apiFetch("/api/teacher/courses/add", {
+      teacherName,
+      courseName: newClassId.trim(),
+    });
+    if (data.success) {
+      fetchCourses();
+      setNewClassId("");
+      setNotification({
+        show: true,
+        message: "Class added successfully!",
+        type: "success",
+      });
+    } else {
+      setNotification({
+        show: true,
+        message: data.message || "Failed to add class",
+        type: "error",
+      });
+    }
+  };
+
+  // Add Student
+  const handleAddStudent = async () => {
+    if (!studentEmail.trim() || !selectedClass) return;
+    const data = await apiFetch("/api/teacher/students/add", {
+      teacherName,
+      studentEmail,
+      courseName: selectedClass,
+    });
+    if (data.success) {
+      fetchStudents();
+      setStudentEmail("");
+      setNotification({
+        show: true,
+        message: "Student added successfully!",
+        type: "success",
+      });
+    } else {
+      setNotification({
+        show: true,
+        message: data.message || "Failed to add student",
+        type: "error",
+      });
+    }
+  };
+
+  // Request VM
+  const handleVmRequest = async () => {
+    if (!teacherEmail || !selectedVmClass || !vmType) return;
+    try {
+      const response = await fetch("https://vmeetbackend.azurewebsites.net/api/teacher/vm/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teacherEmail,
+          courseName: selectedVmClass,
+          vmType,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        fetchVmRequests();
+        setNotification({
+          show: true,
+          message: data.message || "VM Request submitted successfully!",
+          type: "success",
+        });
+      } else {
+        setNotification({
+          show: true,
+          message: data.message || "Failed to request VM",
+          type: "error",
+        });
+      }
+    } catch (err) {
+      console.error("Error:", err);
+      setNotification({
+        show: true,
+        message: "Server error. Please try again.",
+        type: "error",
+      });
+    }
+  };
+
+  // Chat submit handler
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatMessage.trim()) return;
+
+    // Add user message to chat
+    setChatHistory(prev => [...prev, { role: 'user', content: chatMessage }]);
+    
+    setIsTyping(true);
+    setChatMessage("");
+    
+    try {
+      const response = await fetch("https://vmeetbackend.azurewebsites.net/api/teacher/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: chatMessage }),
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setChatHistory(prev => [...prev, { 
+          role: 'assistant', 
+          content: data.reply,
+          isNew: true 
+        }]);
+      }
+    } catch (err) {
+      console.error("Chat error:", err);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  useEffect(() => {
+    if (teacherName) fetchCourses();
+  }, [teacherName]);
+
+  useEffect(() => {
+    if (selectedClass) fetchStudents();
+  }, [selectedClass]);
+
+  useEffect(() => {
+    if (teacherEmail) fetchVmRequests();
+  }, [teacherEmail]);
+
+  return (
+    <div className="min-h-screen flex bg-gradient-to-br from-white via-lime-50 to-white text-gray-800 font-sans">
+      {/* ✅ Sidebar */}
+      <aside
+        className={`${
+          sidebarOpen ? "w-64" : "w-20"
+        } transition-all duration-300 bg-white border-r border-lime-200 shadow-lg flex flex-col items-start p-4`}
+      >
+        <div className="flex justify-between items-center w-full mb-6">
+          <h1
+            className={`text-2xl font-extrabold text-lime-600 transition-all ${
+              sidebarOpen ? "opacity-100" : "opacity-0 w-0"
+            }`}
+          >
+            Quick Select
+          </h1>
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 rounded-md hover:bg-lime-100"
+          >
+            {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
+        </div>
+
+        <nav className="space-y-3 w-full">
+          <button
+            onClick={() => setActiveSection("courses")}
+            className={`flex items-center gap-3 w-full px-4 py-2 rounded-lg font-medium transition-all ${
+              activeSection === "courses"
+                ? "bg-lime-600 text-white"
+                : "hover:bg-lime-50 hover:text-lime-700 text-gray-700"
+            }`}
+          >
+            <BookOpen size={20} />
+            {sidebarOpen && <span>Course Management</span>}
+          </button>
+
+          <button
+            onClick={() => setActiveSection("vm")}
+            className={`flex items-center gap-3 w-full px-4 py-2 rounded-lg font-medium transition-all ${
+              activeSection === "vm"
+                ? "bg-lime-600 text-white"
+                : "hover:bg-lime-50 hover:text-lime-700 text-gray-700"
+            }`}
+          >
+            <Cpu size={20} />
+            {sidebarOpen && <span>VM Management</span>}
+          </button>
+        </nav>
+      </aside>
+
+      {/* ✅ Main Content */}
+      <main className={`flex-1 p-8 overflow-y-auto ${isChatOpen ? 'mr-96' : 'mr-16'} transition-all duration-300`}>
+        <Notify
+          message={notification.message}
+          show={notification.show}
+          type={notification.type}
+          onClose={() => setNotification({ ...notification, show: false })}
+        />
+
+        {/* ===== COURSE MANAGEMENT SECTION ===== */}
+        {activeSection === "courses" && (
+          <section id="courses" >
+            <h2 className="text-3xl  font-bold text-lime-600 mb-8">Course Management</h2>
+
+            {/* Create New Class */}
+            <div className="mb-8 bg-white rounded-2xl shadow-md border border-lime-200 p-6">
+              <h3 className="text-2xl font-semibold mb-4 text-lime-700">Create New Class</h3>
+              <div className="flex flex-wrap gap-4 items-center">
+                <input
+                  type="text"
+                  placeholder="Enter Course Name"
+                  value={newClassId}
+                  onChange={(e) => setNewClassId(e.target.value)}
+                  className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                />
+                <button
+                  onClick={handleAddClass}
+                  className="px-5 py-2 bg-lime-600 text-white rounded-lg font-semibold hover:bg-lime-700 transition"
+                >
+                  Add Class
+                </button>
+              </div>
+            </div>
+
+            {/* Add Student */}
+            <div className="mb-8 bg-white rounded-2xl shadow-md border border-lime-200 p-6">
+              <h3 className="text-2xl font-semibold mb-4 text-lime-700">Add Student to Class</h3>
+              <div className="flex flex-wrap gap-4 items-center">
+                <input
+                  type="email"
+                  placeholder="Student Email"
+                  value={studentEmail}
+                  onChange={(e) => setStudentEmail(e.target.value)}
+                  className="flex-1 min-w-[200px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                />
+                <select
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                >
+                  {classes.map((cls, idx) => (
+                    <option key={idx} value={cls.CourseName}>
+                      {cls.CourseName}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAddStudent}
+                  className="px-5 py-2 bg-lime-600 text-white rounded-lg font-semibold hover:bg-lime-700 transition"
+                >
+                  Save Student
+                </button>
+              </div>
+            </div>
+
+            {/* Student List */}
+            <div className="bg-white rounded-2xl shadow-md border border-lime-200 p-6">
+              <h3 className="text-2xl font-semibold mb-4 text-lime-700">Students List</h3>
+              {loading ? (
+                <p className="text-gray-500">Loading...</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm text-gray-800">
+                    <thead className="bg-lime-100 text-lime-800">
+                      <tr>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Name</th>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Email</th>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Class</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {students.length === 0 ? (
+                        <tr>
+                          <td colSpan="3" className="text-center py-6 text-gray-400 italic">
+                            No students found
+                          </td>
+                        </tr>
+                      ) : (
+                        students.map((student, idx) => (
+                          <tr key={idx} className="hover:bg-lime-50 transition">
+                            <td className="py-3 px-5 border-b border-dotted border-gray-300">
+                              {student.fullname}
+                            </td>
+                            <td className="py-3 px-5 border-b border-dotted border-gray-300">
+                              {student.email}
+                            </td>
+                            <td className="py-3 px-5 border-b border-dotted border-gray-300">
+                              {student.CourseName}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ===== VM MANAGEMENT SECTION ===== */}
+        {activeSection === "vm" && (
+          <section id="vm">
+            <h2 className="text-3xl font-bold text-lime-600 mb-8">VM Management</h2>
+
+            {/* Request VM */}
+            <div className="mb-8 bg-white rounded-2xl shadow-md border border-lime-200 p-6">
+              <h3 className="text-2xl font-semibold mb-4 text-lime-700">Request a Virtual Machine</h3>
+              <div className="flex flex-wrap gap-4 items-center">
+                <select
+                  value={selectedVmClass}
+                  onChange={(e) => setSelectedVmClass(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                >
+                  {classes.map((cls, idx) => (
+                    <option key={idx} value={cls.CourseName}>
+                      {cls.CourseName}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={vmType}
+                  onChange={(e) => setVmType(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                >
+                  <option value="pythonVM">Python VM</option>
+                  <option value="chromeVM">Chrome VM</option>
+                  <option value="nodejsVM">NodeJS VM</option>
+                </select>
+
+                <button
+                  onClick={handleVmRequest}
+                  className="px-5 py-2 bg-lime-600 text-white rounded-lg font-semibold hover:bg-lime-700 transition"
+                >
+                  Request VM
+                </button>
+              </div>
+            </div>
+
+            {/* VM Requests Table */}
+            <div className="bg-white rounded-2xl shadow-md border border-lime-200 p-6">
+              <h3 className="text-2xl font-semibold mb-4 text-lime-700">Your VM Requests</h3>
+              {vmRequests.length === 0 ? (
+                <p className="text-gray-500">No VM requests found.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm text-gray-800">
+                    <thead className="bg-lime-100 text-lime-800">
+                      <tr>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Course</th>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">VM Type</th>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Status</th>
+                        <th className="py-3 px-5 text-left border-b border-dotted border-lime-300">Requested On</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vmRequests.map((req) => (
+                        <tr key={req.id} className="hover:bg-lime-50 transition">
+                          <td className="py-3 px-5 border-b border-dotted border-gray-300">{req.courseName}</td>
+                          <td className="py-3 px-5 border-b border-dotted border-gray-300">{req.vmType}</td>
+                          <td className="py-3 px-5 border-b border-dotted border-gray-300">
+                            {req.isApproved ? (
+                              <span className="text-lime-600 font-semibold">Approved</span>
+                            ) : (
+                              <span className="text-gray-500">Pending</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-5 border-b border-dotted border-gray-300">
+                            {new Date(req.created_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+      </main>
+
+      {/* Add Chat Section */}
+      <div className={`fixed right-0 top-0 h-full bg-white shadow-lg transition-all duration-300 ${isChatOpen ? 'w-96' : 'w-16'} border-l border-lime-200`}>
+        <div className="h-full flex flex-col">
+          {/* Chat Header */}
+          <div className="p-4 border-b border-lime-200 flex items-center justify-between bg-white">
+            {isChatOpen && <h3 className="font-semibold text-lime-600">AI Assistant</h3>}
+            <button
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              className="p-2 hover:bg-lime-100 rounded-lg transition-colors"
+            >
+              <MessageCircle size={20} className="text-lime-600" />
+            </button>
+          </div>
+
+          {/* Chat Messages */}
+          {isChatOpen && (
+            <>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {chatHistory.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 ${
+                        msg.role === 'user'
+                          ? 'bg-lime-600 text-white'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      {msg.role === 'assistant' && msg.isNew ? (
+                        <TextType 
+                          text={[msg.content]}
+                          typingSpeed={25}
+                          pauseDuration={1500}
+                          showCursor={true}
+                          cursorCharacter="_"
+                          loop={false}
+                        />
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Loading indicator */}
+                {isTyping && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 rounded-lg p-3">
+                      <Loader className="w-5 h-5 animate-spin text-lime-600" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleChatSubmit} className="p-4 border-t border-lime-200">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatMessage}
+                    onChange={(e) => setChatMessage(e.target.value)}
+                    placeholder="Ask me anything..."
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-lime-500 outline-none"
+                    disabled={isTyping}
+                  />
+                  <button
+                    type="submit"
+                    className={`px-4 py-2 bg-lime-600 text-white rounded-lg transition ${
+                      isTyping ? 'opacity-50 cursor-not-allowed' : 'hover:bg-lime-700'
+                    }`}
+                    disabled={isTyping}
+                  >
+                    Send
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TeacherPortal;
